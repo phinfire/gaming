@@ -29,8 +29,25 @@ export class TerrainGenerator {
         ) * TERRAIN_CONFIG.mountainsMultiplier;
 
         const plains = this.plainsNoise(x, y);
+        
+        // Add canyon fill: prevent internal canyons from going too deep
+        const canyonFloor = this.canyonFillNoise(x, y);
+        
         const height = plains * (1 - mask) + mountains * mask;
-        return height * TERRAIN_CONFIG.heightMultiplier;
+        
+        // Blend in canyon floor when in mountain areas
+        const filledHeight = height * (1 - mask * TERRAIN_CONFIG.canyonFillStrength) + 
+                            canyonFloor * (mask * TERRAIN_CONFIG.canyonFillStrength);
+        
+        return filledHeight * TERRAIN_CONFIG.heightMultiplier;
+    }
+
+    private canyonFillNoise(x: number, y: number): number {
+        // Create a smooth base that prevents ultra-deep canyons
+        // Uses coarser noise to create gentle raised areas
+        const fill = normalize(this.noise2D(x * 0.001, y * 0.001)) * 0.6 +
+                     normalize(this.noise2D(x * 0.002, y * 0.002)) * 0.4
+        return fill
     }
 
     private plainsNoise(x: number, y: number) {

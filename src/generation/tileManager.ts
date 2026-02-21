@@ -23,17 +23,17 @@ export class TileManager {
     private pendingTiles = new Map<string, PendingTile>()
     private pendingLODReplacements = new Map<string, { oldMesh: THREE.Mesh; oldLodLevel: number }>()
     private cachedMeshes = new Map<string, { mesh: THREE.Mesh; lodLevel: number; timestamp: number }>()
-    private tilesWithTrees = new Set<string>()  // Track which tiles have had trees scattered
+    private tilesWithTrees = new Set<string>()
     private workerQueue: Array<{ key: string; tileSize: number; segments: number; worldX: number; worldZ: number }> = []
     private deferredTreeScatters: Array<{ tile: THREE.Mesh; tileX: number; tileZ: number }> = []
     private scene: THREE.Scene
     private worker: Worker
     private terrainGen: TerrainGenerator
     private treeGenerator: ConifersTreeGenerator
-    private maxWorkerMessagesPerFrame = 2
-    private maxWorkerMessagesPerFrameInitial = 16  // High throughput during initial load
+    private maxWorkerMessagesPerFrame = 4
+    private maxWorkerMessagesPerFrameInitial = 16
     private isInitialLoad = true
-    private initialLoadThreshold = 25  // Switch to normal throttling after 25 tiles
+    private initialLoadThreshold = 25
 
     constructor(scene: THREE.Scene) {
         this.scene = scene

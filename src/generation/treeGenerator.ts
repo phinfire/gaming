@@ -28,8 +28,6 @@ export class ConifersTreeGenerator implements TreeGenerator {
         this.scene = scene
         this.terrainGen = terrainGen
         this.treeGeometries = new Map()
-
-        // Create geometries for each tree type variant
         const typeNames = Object.keys(TREE_CONFIG.treeTypes) as TreeTypeName[]
         for (const typeName of typeNames) {
             const typeConfig = TREE_CONFIG.treeTypes[typeName]
@@ -52,18 +50,11 @@ export class ConifersTreeGenerator implements TreeGenerator {
         return x - Math.floor(x)
     }
 
-    /**
-     * Deterministic random number in range [0, 1] using multiple hash functions
-     * to reduce patterns from single seeding method
-     */
     private hash2D(x: number, y: number, offset: number = 0): number {
         const seed = x * 73856093 ^ y * 19349663 ^ offset * 83492791
         return this.seededRandom(seed)
     }
 
-    /**
-     * Select tree type weighted by distribution
-     */
     private selectTreeType(seed: number): TreeTypeName {
         const rand = this.seededRandom(seed)
         const types = Object.keys(TREE_CONFIG.treeTypes) as TreeTypeName[]
@@ -83,13 +74,11 @@ export class ConifersTreeGenerator implements TreeGenerator {
     }
 
     scatterTreesOnTile(tile: THREE.Mesh, tileX: number, tileZ: number): void {
-        // Generate random candidate positions (not grid-based to avoid visible patterns)
         const candidates: { x: number; z: number }[] = []
         const tileWorldX = tileX * TILE_CONFIG.tileSize
         const tileWorldZ = tileZ * TILE_CONFIG.tileSize
         
         for (let i = 0; i < TREE_CONFIG.candidatePositionsPerTile; i++) {
-            // Use 2D hash to deterministically generate random positions within tile
             const randX = this.hash2D(tileX, tileZ, i * 2) * TILE_CONFIG.tileSize - TILE_CONFIG.tileSize / 2
             const randZ = this.hash2D(tileX, tileZ, i * 2 + 1) * TILE_CONFIG.tileSize - TILE_CONFIG.tileSize / 2
             
@@ -98,24 +87,16 @@ export class ConifersTreeGenerator implements TreeGenerator {
                 z: randZ
             })
         }
-        
-        // Filter candidates based on forest density noise and assign tree types
-        const treesToPlace: TreeInstance[] = []
-        
+        const treesToPlace: TreeInstance[] = []  
         for (let i = 0; i < candidates.length; i++) {
             const candidate = candidates[i]
             const worldX = tileWorldX + candidate.x
             const worldZ = tileWorldZ + candidate.z
-            
-            // Sample forest density at this position
             const forestDensity = this.terrainGen.getForestDensityAtWorldPosition(worldX, worldZ)
-            
-            // Place tree if density exceeds threshold
             if (forestDensity > TREE_CONFIG.baseForestThreshold) {
-                // Check slope - skip steep terrain
                 const normal = this.terrainGen.getSurfaceNormalAtWorldPosition(worldX, worldZ)
                 if (normal.y < TREE_CONFIG.maxSlopeForTrees) {
-                    continue  // Too steep, skip this tree
+                    continue
                 }
                 const seed = tileX * 73856093 ^ tileZ * 19349663 ^ i * 83492791
                 const treeType = this.selectTreeType(seed)
@@ -130,13 +111,10 @@ export class ConifersTreeGenerator implements TreeGenerator {
                 })
             }
         }
-        
-        // Cap maximum trees per tile to prevent edge case density spikes
         treesToPlace.splice(TREE_CONFIG.maxTreesPerTile)
         
-        if (treesToPlace.length === 0) return  // No trees on this tile
-        
-        // Group trees by type
+        if (treesToPlace.length === 0) return
+
         const treesByType = new Map<TreeTypeName, TreeInstance[]>()
         for (const tree of treesToPlace) {
             if (!treesByType.has(tree.type)) {

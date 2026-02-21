@@ -18,16 +18,17 @@ export const TERRAIN_CONFIG = {
     plainsScale2: 0.01,
     plainsWeight1: 0.7,
     plainsWeight2: 0.3,
-    plainsMultiplier: 0.3,
+    plainsMultiplier: 0.5,
     
     // Mountain mask
-    mountainMaskScale: 0.0015,
+    mountainMaskScale: 0.002,
     mountainMaskPower: 2.0,
     mountainMaskSmoothstepLow: 0.4,
-    mountainMaskSmoothstepHigh: 0.65,
-    
+    mountainMaskSmoothstepHigh: 0.65,    
+    // Canyon fill (prevents internal canyons from being too deep)
+    canyonFillStrength: 0.3,  // 0 = no fill, 1 = completely levels canyons    
     // Height scaling
-    heightMultiplier: 100,
+    heightMultiplier: 50,
     
     // Terrain texturing
     grassColor: 0x3d7d3d,           // Grass green
