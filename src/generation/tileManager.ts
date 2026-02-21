@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { TerrainGenerator } from './terrain'
 import { ConifersTreeGenerator } from './treeGenerator'
+import { TextureManager } from '../textures/textureManager'
 import { TERRAIN_CONFIG, TILE_CONFIG } from '../config'
 import { debugState } from '../keyboard'
 
@@ -30,6 +31,7 @@ export class TileManager {
     private worker: Worker
     private terrainGen: TerrainGenerator
     private treeGenerator: ConifersTreeGenerator
+    private textureManager: TextureManager
     private maxWorkerMessagesPerFrame = 4
     private maxWorkerMessagesPerFrameInitial = 16
     private isInitialLoad = true
@@ -39,8 +41,10 @@ export class TileManager {
         this.scene = scene
         this.terrainGen = new TerrainGenerator()
         this.treeGenerator = new ConifersTreeGenerator(scene, this.terrainGen, 0, 0)
+        this.textureManager = new TextureManager()
         this.worker = new Worker(new URL('../worker/tileWorker.ts', import.meta.url), { type: 'module' })
         this.setupWorkerListener()
+        this.textureManager.loadTextures()
     }
 
     private setupWorkerListener() {
@@ -186,6 +190,18 @@ export class TileManager {
         geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
         geometry.setIndex(new THREE.BufferAttribute(indices, 1))
         
+        // Add UV coordinates for texture mapping
+        const uvs = new Float32Array((segments + 1) * (segments + 1) * 2)
+        const textureRepeatScale = TILE_CONFIG.tileSize * TERRAIN_CONFIG.textureRepeatPerUnit
+        let uvIndex = 0
+        for (let z = 0; z <= segments; z++) {
+            for (let x = 0; x <= segments; x++) {
+                uvs[uvIndex++] = (x / segments) * textureRepeatScale
+                uvs[uvIndex++] = (z / segments) * textureRepeatScale
+            }
+        }
+        geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2))
+        
         // Apply heights
         const positionAttribute = geometry.attributes.position as THREE.BufferAttribute
         for (let i = 0; i < positionAttribute.count; i++) {
@@ -206,10 +222,9 @@ export class TileManager {
         
         geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3))
         
-        const ground = new THREE.Mesh(
-            geometry,
-            new THREE.MeshStandardMaterial({ vertexColors: true, metalness: 0.0, roughness: 0.95 })
-        )
+        const material = this.textureManager.createTerrainMaterial()
+        
+        const ground = new THREE.Mesh(geometry, material)
         ground.position.x = xPos
         ground.position.y = yPos
         ground.position.z = zPos
@@ -219,7 +234,6 @@ export class TileManager {
     }
 
     update(cameraWorldPos: THREE.Vector3) {
-        // Allow skipping tile loads for debugging
         if (!debugState.terrainLoadingEnabled) {
             return
         }
@@ -312,6 +326,13 @@ export class TileManager {
         for (let i = 0; i < toProcess; i++) {
             const msg = this.workerQueue.shift()!
             this.worker.postMessage(msg)
+        }
+    }
+
+    setInitialLoad(value: boolean): void {
+        if (this.isInitialLoad !== value) {
+            this.isInitialLoad = value
+            console.log(`[TileManager] Initial load ${value ? 'enabled' : 'disabled'}`)
         }
     }
 }

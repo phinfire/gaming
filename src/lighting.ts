@@ -43,6 +43,9 @@ export function setupLighting(scene: THREE.Scene) {
     directionalLight.shadow.camera.bottom = -500
     directionalLight.shadow.camera.near = 0.1
     directionalLight.shadow.camera.far = 2000
+    directionalLight.shadow.bias = -0.0001
+    directionalLight.shadow.radius = 4
+    directionalLight.shadow.normalBias = 0.01
     scene.add(directionalLight)
     scene.add(directionalLight.target)
 

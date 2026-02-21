@@ -33,7 +33,16 @@ export const TERRAIN_CONFIG = {
     // Terrain texturing
     grassColor: 0x3d7d3d,           // Grass green
     rockColor: 0x888888,            // Rock gray
-    slopeThreshold: 0.7             // Normal.y threshold: above = grass, below = rock
+    slopeThreshold: 0.7,            // Normal.y threshold: above = grass, below = rock
+    
+    // Height-based texture blending
+    textureBlendingEnabled: true,
+    grassHeightMax: 20,             // Transition from grass to rock at this height
+    rockHeightMin: 20,              // Rock starts blending in here
+    rockHeightMax: 40,              // Full rock at this height
+    snowHeightMin: 35,              // Snow starts blending in here
+    snowHeightMax: 50,              // Full snow at this height
+    textureRepeatPerUnit: 0.2      // How many texture repeats per 1 unit
 }
 
 // Tree generation parameters

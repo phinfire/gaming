@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { MapControls } from 'three/examples/jsm/controls/MapControls.js'
+import type { TileManager } from './generation/tileManager'
 
 const STORAGE_KEY = 'savedCameraTransform'
 
@@ -61,7 +62,10 @@ export function clearCameraTransform(): void {
     console.log('Camera transform cleared')
 }
 
-export function resetCameraToDefault(camera: THREE.Camera, controls: MapControls): void {
+export function resetCameraToDefault(camera: THREE.Camera, controls: MapControls, tileManager?: TileManager): void {
+    if (tileManager) {
+        tileManager.setInitialLoad(true)
+    }
     if (!loadCameraTransform(camera, controls)) {
         camera.position.set(-50, 100, -50)
         controls.target.set(0, 0, 0)

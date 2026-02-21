@@ -29,7 +29,7 @@ function setupClickHandler(camera: THREE.Camera, clickableObjects: THREE.Mesh[])
     })
 }
 
-function setupCameraTransformUI(camera: THREE.Camera, controls: MapControls) {
+function setupCameraTransformUI(camera: THREE.Camera, controls: MapControls, tileManager: TileManager) {
     const saveBtn = document.getElementById('saveCameraBtn')
     if (saveBtn) {
         saveBtn.addEventListener('click', () => {
@@ -40,7 +40,7 @@ function setupCameraTransformUI(camera: THREE.Camera, controls: MapControls) {
     const resetBtn = document.getElementById('resetCameraBtn')
     if (resetBtn) {
         resetBtn.addEventListener('click', () => {
-            resetCameraToDefault(camera, controls)
+            resetCameraToDefault(camera, controls, tileManager)
         })
     }
 }
@@ -64,7 +64,7 @@ function init() {
     setupInputHandlers()
     setupResizeHandler(camera as any, renderer)
     setupClickHandler(camera, clickableObjects)
-    setupCameraTransformUI(camera, controls)
+    setupCameraTransformUI(camera, controls, tileManager)
 
     animate({ scene, camera, renderer, controls, objects: clickableObjects, tileManager, lights })
 }
