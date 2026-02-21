@@ -4,15 +4,19 @@ import { TERRAIN_CONFIG } from '../config'
 const TEXTURE_PATHS = {
     ground: '/gaming/textures/ground/Ground103_2K-PNG_Color.png',
     groundNormal: '/gaming/textures/ground/Ground103_2K-PNG_NormalGL.png',
+    groundRoughness: '/gaming/textures/ground/Ground103_2K-PNG_Roughness.png',
 
     grass: '/gaming/textures/grass/Grass001_2K-PNG_Color.png',
     grassNormal: '/gaming/textures/grass/Grass001_2K-PNG_NormalGL.png',
+    grassRoughness: '/gaming/textures/grass/Grass001_2K-PNG_Roughness.png',
 
     rock: '/gaming/textures/rock/Rock058_2K-PNG_Color.png',
     rockNormal: '/gaming/textures/rock/Rock058_2K-PNG_NormalGL.png',
+    rockRoughness: '/gaming/textures/rock/Rock058_2K-PNG_Roughness.png',
 
     snow: '/gaming/textures/snow/Snow014_2K-PNG_Color.png',
-    snowNormal: '/gaming/textures/snow/Snow014_2K-PNG_NormalGL.png'
+    snowNormal: '/gaming/textures/snow/Snow014_2K-PNG_NormalGL.png',
+    snowRoughness: '/gaming/textures/snow/Snow014_2K-PNG_Roughness.png'
 }
 
 export class TextureManager {
@@ -72,15 +76,60 @@ export class TextureManager {
 
             shader.uniforms.rockMap = { value: this.loadedTextures['rock'] }
             shader.uniforms.rockNormalMap = { value: this.loadedTextures['rockNormal'] }
+            shader.uniforms.rockRoughnessMap = { value: this.loadedTextures['rockRoughness'] }
+            shader.uniforms.grassMap = { value: this.loadedTextures['grass'] }
+            shader.uniforms.grassNormalMap = { value: this.loadedTextures['grassNormal'] }
+            shader.uniforms.grassRoughnessMap = { value: this.loadedTextures['grassRoughness'] }
+            shader.uniforms.snowMap = { value: this.loadedTextures['snow'] }
+            shader.uniforms.snowNormalMap = { value: this.loadedTextures['snowNormal'] }
+            shader.uniforms.snowRoughnessMap = { value: this.loadedTextures['snowRoughness'] }
+            shader.uniforms.groundRoughnessMap = { value: this.loadedTextures['groundRoughness'] }
 
             shader.uniforms.heightStart = { value: TERRAIN_CONFIG.rockHeightMin }
             shader.uniforms.heightEnd = { value: TERRAIN_CONFIG.rockHeightMax }
+            shader.uniforms.snowHeightStart = { value: TERRAIN_CONFIG.snowHeightMin }
+            shader.uniforms.snowHeightEnd = { value: TERRAIN_CONFIG.snowHeightMax }
             shader.uniforms.slopeThreshold = { value: TERRAIN_CONFIG.slopeThreshold }
+            shader.uniforms.groundNoiseScale = { value: TERRAIN_CONFIG.groundNoiseScale }
 
             shader.vertexShader = shader.vertexShader.replace(
                 '#include <common>', `#include <common>
+                uniform float groundNoiseScale;
                 varying vec3 vWorldPosition;
                 varying vec3 vGeometryNormal;
+                varying float vGroundNoiseBlend;
+                
+                // Simple 2D noise function
+                float noise(vec2 p) {
+                    return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453);
+                }
+                
+                float smoothNoise(vec2 p) {
+                    vec2 i = floor(p);
+                    vec2 f = fract(p);
+                    f = f * f * (3.0 - 2.0 * f);
+                    return mix(
+                        mix(noise(i), noise(i + vec2(1.0, 0.0)), f.x),
+                        mix(noise(i + vec2(0.0, 1.0)), noise(i + vec2(1.0, 1.0)), f.x),
+                        f.y
+                    );
+                }
+                
+                float fbm(vec2 p) {
+                    float value = 0.0;
+                    float amplitude = 1.0;
+                    float frequency = 1.0;
+                    float maxValue = 0.0;
+                    
+                    for(int i = 0; i < 5; i++) {
+                        value += amplitude * smoothNoise(p * frequency);
+                        maxValue += amplitude;
+                        amplitude *= 0.5;
+                        frequency *= 2.0;
+                    }
+                    
+                    return value / maxValue;
+                }
                 `
             )
 
@@ -89,7 +138,9 @@ export class TextureManager {
 
                 `#include <worldpos_vertex>
                 vWorldPosition = worldPosition.xyz;
-                vGeometryNormal = normalize(mat3(modelMatrix) * normal);`
+                vGeometryNormal = normalize(mat3(modelMatrix) * normal);
+                float groundNoise = fbm(vWorldPosition.xz * groundNoiseScale);
+                vGroundNoiseBlend = smoothstep(0.40, 0.50, groundNoise);`
             )
             shader.fragmentShader = shader.fragmentShader.replace(
                 '#include <common>',
@@ -97,40 +148,78 @@ export class TextureManager {
                 `#include <common>
                 uniform sampler2D rockMap;
                 uniform sampler2D rockNormalMap;
+                uniform sampler2D rockRoughnessMap;
+                uniform sampler2D grassMap;
+                uniform sampler2D grassNormalMap;
+                uniform sampler2D grassRoughnessMap;
+                uniform sampler2D snowMap;
+                uniform sampler2D snowNormalMap;
+                uniform sampler2D snowRoughnessMap;
+                uniform sampler2D groundRoughnessMap;
                 uniform float heightStart;
                 uniform float heightEnd;
+                uniform float snowHeightStart;
+                uniform float snowHeightEnd;
                 uniform float slopeThreshold;
                 varying vec3 vWorldPosition;
                 varying vec3 vGeometryNormal;
-                float heightBlendFactor;
-                float slopeBlendFactor;
-                float totalBlendFactor;`
+                varying float vGroundNoiseBlend;
+                float rockHeightBlend;
+                float snowHeightBlend;
+                float slopeBlend;
+                float finalRoughness;`
                 )
             shader.fragmentShader = shader.fragmentShader.replace(
                 'vec4 diffuseColor = vec4( diffuse, opacity );',
 
                 `vec4 diffuseColor = vec4( diffuse, opacity );
-                heightBlendFactor = smoothstep(heightStart, heightEnd, vWorldPosition.y);
-                slopeBlendFactor = 1.0 - smoothstep(0.0, slopeThreshold, vGeometryNormal.y);
-                totalBlendFactor = max(heightBlendFactor, slopeBlendFactor);
+                rockHeightBlend = smoothstep(heightStart, heightEnd, vWorldPosition.y);
+                snowHeightBlend = smoothstep(snowHeightStart, snowHeightEnd, vWorldPosition.y);
+                slopeBlend = 1.0 - smoothstep(0.0, slopeThreshold, vGeometryNormal.y);
                 `
             )
             shader.fragmentShader = shader.fragmentShader.replace(
                 '#include <map_fragment>',
 
                 `vec4 groundColor = texture2D(map, vMapUv);
+                vec4 grassColor = texture2D(grassMap, vMapUv);
                 vec4 rockColor = texture2D(rockMap, vMapUv);
-                vec4 blendedColor = mix(groundColor, rockColor, totalBlendFactor);
-                diffuseColor *= blendedColor;`
+                vec4 snowColor = texture2D(snowMap, vMapUv);
+                vec4 lowGroundColor = mix(groundColor, grassColor, vGroundNoiseBlend);
+                vec4 blendedColor = mix(lowGroundColor, rockColor, rockHeightBlend);
+                blendedColor = mix(blendedColor, snowColor, snowHeightBlend);
+                blendedColor = mix(blendedColor, rockColor, slopeBlend);
+                diffuseColor *= blendedColor;
+                
+                float groundRoughness = texture2D(groundRoughnessMap, vMapUv).g;
+                float grassRoughness = texture2D(grassRoughnessMap, vMapUv).g;
+                float rockRoughness = texture2D(rockRoughnessMap, vMapUv).g;
+                float snowRoughness = texture2D(snowRoughnessMap, vMapUv).g;
+                float lowGroundRoughness = mix(groundRoughness, grassRoughness, vGroundNoiseBlend);
+                finalRoughness = mix(lowGroundRoughness, rockRoughness, rockHeightBlend);
+                finalRoughness = mix(finalRoughness, snowRoughness, snowHeightBlend);
+                finalRoughness = mix(finalRoughness, rockRoughness, slopeBlend);`
             )
 
             shader.fragmentShader = shader.fragmentShader.replace(
                 '#include <normal_fragment_maps>',
 
                 `vec3 groundNormal = texture2D(normalMap, vMapUv).xyz * 2.0 - 1.0;
+                vec3 grassNormalTex = texture2D(grassNormalMap, vMapUv).xyz * 2.0 - 1.0;
                 vec3 rockNormalTex = texture2D(rockNormalMap, vMapUv).xyz * 2.0 - 1.0;
-                vec3 blendedNormalTex = mix(groundNormal, rockNormalTex, totalBlendFactor);
+                vec3 snowNormalTex = texture2D(snowNormalMap, vMapUv).xyz * 2.0 - 1.0;
+                vec3 lowGroundNormal = mix(groundNormal, grassNormalTex, vGroundNoiseBlend);
+                vec3 blendedNormalTex = mix(lowGroundNormal, rockNormalTex, rockHeightBlend);
+                blendedNormalTex = mix(blendedNormalTex, snowNormalTex, snowHeightBlend);
+                blendedNormalTex = mix(blendedNormalTex, rockNormalTex, slopeBlend);
                 normal = normalize(tbn * blendedNormalTex);`
+            )
+            
+            shader.fragmentShader = shader.fragmentShader.replace(
+                '#include <roughness_fragment>',
+                
+                `roughnessFactor = finalRoughness;
+                #include <roughness_fragment>`
             )
         }
 

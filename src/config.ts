@@ -40,9 +40,10 @@ export const TERRAIN_CONFIG = {
     grassHeightMax: 20,             // Transition from grass to rock at this height
     rockHeightMin: 20,              // Rock starts blending in here
     rockHeightMax: 40,              // Full rock at this height
-    snowHeightMin: 35,              // Snow starts blending in here
-    snowHeightMax: 50,              // Full snow at this height
-    textureRepeatPerUnit: 0.2      // How many texture repeats per 1 unit
+    snowHeightMin: 60,              // Snow starts blending in here
+    snowHeightMax: 75,              // Full snow at this height
+    textureRepeatPerUnit: 0.2,      // How many texture repeats per 1 unit
+    groundNoiseScale: 0.01           // Scale of ground/grass noise variation
 }
 
 // Tree generation parameters
