@@ -78,5 +78,5 @@ jobs:
             docker run -d \
               --name gaming-app \
               --restart unless-stopped \
-              -p 3000:80 \
+              -p ${{ secrets.VPS_CONTAINER_PORT }}:80 \
               ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:main
