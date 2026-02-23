@@ -17,6 +17,7 @@ const TEXTURE_PATHS = {
     snow: '/gaming/textures/snow/Snow014_2K-PNG_Color.png',
     snowNormal: '/gaming/textures/snow/Snow014_2K-PNG_NormalGL.png',
     snowRoughness: '/gaming/textures/snow/Snow014_2K-PNG_Roughness.png'
+
 }
 
 export class TextureManager {
@@ -68,12 +69,12 @@ export class TextureManager {
         const material = new THREE.MeshStandardMaterial({
             map: this.loadedTextures['ground'],
             normalMap: this.loadedTextures['groundNormal'],
+            vertexColors: false,
             metalness: 0.05,
             roughness: 0.85
         })
 
         material.onBeforeCompile = (shader) => {
-
             shader.uniforms.rockMap = { value: this.loadedTextures['rock'] }
             shader.uniforms.rockNormalMap = { value: this.loadedTextures['rockNormal'] }
             shader.uniforms.rockRoughnessMap = { value: this.loadedTextures['rockRoughness'] }
@@ -90,61 +91,27 @@ export class TextureManager {
             shader.uniforms.snowHeightStart = { value: TERRAIN_CONFIG.snowHeightMin }
             shader.uniforms.snowHeightEnd = { value: TERRAIN_CONFIG.snowHeightMax }
             shader.uniforms.slopeThreshold = { value: TERRAIN_CONFIG.slopeThreshold }
-            shader.uniforms.groundNoiseScale = { value: TERRAIN_CONFIG.groundNoiseScale }
+            // No need for groundNoiseScale anymore
 
+            // Inject varyings for world position, geometry normal, and blend weights
             shader.vertexShader = shader.vertexShader.replace(
                 '#include <common>', `#include <common>
-                uniform float groundNoiseScale;
+                attribute vec4 blendWeights;
                 varying vec3 vWorldPosition;
                 varying vec3 vGeometryNormal;
-                varying float vGroundNoiseBlend;
-                
-                // Simple 2D noise function
-                float noise(vec2 p) {
-                    return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453);
-                }
-                
-                float smoothNoise(vec2 p) {
-                    vec2 i = floor(p);
-                    vec2 f = fract(p);
-                    f = f * f * (3.0 - 2.0 * f);
-                    return mix(
-                        mix(noise(i), noise(i + vec2(1.0, 0.0)), f.x),
-                        mix(noise(i + vec2(0.0, 1.0)), noise(i + vec2(1.0, 1.0)), f.x),
-                        f.y
-                    );
-                }
-                
-                float fbm(vec2 p) {
-                    float value = 0.0;
-                    float amplitude = 1.0;
-                    float frequency = 1.0;
-                    float maxValue = 0.0;
-                    
-                    for(int i = 0; i < 5; i++) {
-                        value += amplitude * smoothNoise(p * frequency);
-                        maxValue += amplitude;
-                        amplitude *= 0.5;
-                        frequency *= 2.0;
-                    }
-                    
-                    return value / maxValue;
-                }
-                `
+                varying vec4 vBlendWeights;`
             )
 
             shader.vertexShader = shader.vertexShader.replace(
                 '#include <worldpos_vertex>',
-
                 `#include <worldpos_vertex>
                 vWorldPosition = worldPosition.xyz;
                 vGeometryNormal = normalize(mat3(modelMatrix) * normal);
-                float groundNoise = fbm(vWorldPosition.xz * groundNoiseScale);
-                vGroundNoiseBlend = smoothstep(0.40, 0.50, groundNoise);`
+                vBlendWeights = blendWeights;
+                `
             )
             shader.fragmentShader = shader.fragmentShader.replace(
                 '#include <common>',
-
                 `#include <common>
                 uniform sampler2D rockMap;
                 uniform sampler2D rockNormalMap;
@@ -163,12 +130,34 @@ export class TextureManager {
                 uniform float slopeThreshold;
                 varying vec3 vWorldPosition;
                 varying vec3 vGeometryNormal;
-                varying float vGroundNoiseBlend;
+                varying vec4 vBlendWeights;
                 float rockHeightBlend;
                 float snowHeightBlend;
                 float slopeBlend;
-                float finalRoughness;`
-                )
+                float finalRoughness;
+                float fertility;
+                // Triplanar mapping
+                vec4 triplanarSample(sampler2D tex, vec3 worldPos, vec3 normal, float scale) {
+                    vec3 absNormal = abs(normal);
+                    absNormal = normalize(absNormal);
+                    float sum = absNormal.x + absNormal.y + absNormal.z;
+                    absNormal /= sum;
+                    vec4 xProj = texture2D(tex, worldPos.yz * scale);
+                    vec4 yProj = texture2D(tex, worldPos.xz * scale);
+                    vec4 zProj = texture2D(tex, worldPos.xy * scale);
+                    return xProj * absNormal.x + yProj * absNormal.y + zProj * absNormal.z;
+                }
+                vec3 triplanarNormalSample(sampler2D tex, vec3 worldPos, vec3 normal, float scale) {
+                    vec3 absNormal = abs(normal);
+                    absNormal = normalize(absNormal);
+                    float sum = absNormal.x + absNormal.y + absNormal.z;
+                    absNormal /= sum;
+                    vec3 xProj = texture2D(tex, worldPos.yz * scale).xyz * 2.0 - 1.0;
+                    vec3 yProj = texture2D(tex, worldPos.xz * scale).xyz * 2.0 - 1.0;
+                    vec3 zProj = texture2D(tex, worldPos.xy * scale).xyz * 2.0 - 1.0;
+                    return normalize(xProj * absNormal.x + yProj * absNormal.y + zProj * absNormal.z);
+                }`
+            )
             shader.fragmentShader = shader.fragmentShader.replace(
                 'vec4 diffuseColor = vec4( diffuse, opacity );',
 
@@ -180,22 +169,24 @@ export class TextureManager {
             )
             shader.fragmentShader = shader.fragmentShader.replace(
                 '#include <map_fragment>',
-
-                `vec4 groundColor = texture2D(map, vMapUv);
-                vec4 grassColor = texture2D(grassMap, vMapUv);
-                vec4 rockColor = texture2D(rockMap, vMapUv);
-                vec4 snowColor = texture2D(snowMap, vMapUv);
-                vec4 lowGroundColor = mix(groundColor, grassColor, vGroundNoiseBlend);
+                `float triplanarScale = 1.0 / 4.0;
+                // Use blend weights from custom attribute
+                // vBlendWeights: x=unused, y=unused, z=unused, w=fertility
+                fertility = vBlendWeights.w;
+                vec4 groundColor = triplanarSample(map, vWorldPosition, vGeometryNormal, triplanarScale);
+                vec4 grassColor = triplanarSample(grassMap, vWorldPosition, vGeometryNormal, triplanarScale);
+                vec4 rockColor = triplanarSample(rockMap, vWorldPosition, vGeometryNormal, triplanarScale);
+                vec4 snowColor = triplanarSample(snowMap, vWorldPosition, vGeometryNormal, triplanarScale);
+                vec4 lowGroundColor = mix(groundColor, grassColor, fertility);
                 vec4 blendedColor = mix(lowGroundColor, rockColor, rockHeightBlend);
                 blendedColor = mix(blendedColor, snowColor, snowHeightBlend);
                 blendedColor = mix(blendedColor, rockColor, slopeBlend);
                 diffuseColor *= blendedColor;
-                
-                float groundRoughness = texture2D(groundRoughnessMap, vMapUv).g;
-                float grassRoughness = texture2D(grassRoughnessMap, vMapUv).g;
-                float rockRoughness = texture2D(rockRoughnessMap, vMapUv).g;
-                float snowRoughness = texture2D(snowRoughnessMap, vMapUv).g;
-                float lowGroundRoughness = mix(groundRoughness, grassRoughness, vGroundNoiseBlend);
+                float groundRoughness = triplanarSample(groundRoughnessMap, vWorldPosition, vGeometryNormal, triplanarScale).g;
+                float grassRoughness = triplanarSample(grassRoughnessMap, vWorldPosition, vGeometryNormal, triplanarScale).g;
+                float rockRoughness = triplanarSample(rockRoughnessMap, vWorldPosition, vGeometryNormal, triplanarScale).g;
+                float snowRoughness = triplanarSample(snowRoughnessMap, vWorldPosition, vGeometryNormal, triplanarScale).g;
+                float lowGroundRoughness = mix(groundRoughness, grassRoughness, fertility);
                 finalRoughness = mix(lowGroundRoughness, rockRoughness, rockHeightBlend);
                 finalRoughness = mix(finalRoughness, snowRoughness, snowHeightBlend);
                 finalRoughness = mix(finalRoughness, rockRoughness, slopeBlend);`
@@ -203,12 +194,12 @@ export class TextureManager {
 
             shader.fragmentShader = shader.fragmentShader.replace(
                 '#include <normal_fragment_maps>',
-
-                `vec3 groundNormal = texture2D(normalMap, vMapUv).xyz * 2.0 - 1.0;
-                vec3 grassNormalTex = texture2D(grassNormalMap, vMapUv).xyz * 2.0 - 1.0;
-                vec3 rockNormalTex = texture2D(rockNormalMap, vMapUv).xyz * 2.0 - 1.0;
-                vec3 snowNormalTex = texture2D(snowNormalMap, vMapUv).xyz * 2.0 - 1.0;
-                vec3 lowGroundNormal = mix(groundNormal, grassNormalTex, vGroundNoiseBlend);
+                `float triplanarScaleNormal = 1.0 / 4.0;
+                vec3 groundNormal = triplanarNormalSample(normalMap, vWorldPosition, vGeometryNormal, triplanarScaleNormal);
+                vec3 grassNormalTex = triplanarNormalSample(grassNormalMap, vWorldPosition, vGeometryNormal, triplanarScaleNormal);
+                vec3 rockNormalTex = triplanarNormalSample(rockNormalMap, vWorldPosition, vGeometryNormal, triplanarScaleNormal);
+                vec3 snowNormalTex = triplanarNormalSample(snowNormalMap, vWorldPosition, vGeometryNormal, triplanarScaleNormal);
+                vec3 lowGroundNormal = mix(groundNormal, grassNormalTex, fertility);
                 vec3 blendedNormalTex = mix(lowGroundNormal, rockNormalTex, rockHeightBlend);
                 blendedNormalTex = mix(blendedNormalTex, snowNormalTex, snowHeightBlend);
                 blendedNormalTex = mix(blendedNormalTex, rockNormalTex, slopeBlend);

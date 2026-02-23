@@ -48,18 +48,18 @@ export const TERRAIN_CONFIG = {
 
 // Tree generation parameters
 export const TREE_CONFIG = {
-    // Trunk
+    // Base trunk
     trunkRadiusBottom: 0.3,
     trunkRadiusTop: 0.4,
     trunkHeight: 3,
     trunkSegments: 8,
-    trunkColor: 0x8b4513,
+    trunkColor: 0x5A3A1E,
     
-    // Foliage
+    // Base foliage
     foliageRadius: 2,
     foliageHeight: 4,
     foliageSegments: 8,
-    foliageColor: 0x228b22,
+    foliageColor: 0x1D4731,
     
     // Noise-based placement
     candidatePositionsPerTile: 160,  // number of random positions to test per tile
@@ -68,37 +68,10 @@ export const TREE_CONFIG = {
     maxTreesPerTile: 50,             // cap on trees per tile to prevent clustering disasters
     maxSlopeForTrees: 0.7,           // min Y component of surface normal (steeper = higher value skipped)
     
-    // Tree type variants (procedural)
-    treeTypes: {
-        tallSkinny: {
-            name: 'Tall Skinny',
-            trunkHeightMultiplier: 1.2,
-            trunkRadiusMultiplier: 0.8,
-            foliageRadiusMultiplier: 0.85,
-            foliageHeightMultiplier: 1.1,
-            weight: 0.4  // distribution weight
-        },
-        shortFat: {
-            name: 'Short Fat',
-            trunkHeightMultiplier: 0.8,
-            trunkRadiusMultiplier: 1.3,
-            foliageRadiusMultiplier: 1.2,
-            foliageHeightMultiplier: 0.9,
-            weight: 0.35
-        },
-        medium: {
-            name: 'Medium',
-            trunkHeightMultiplier: 1.0,
-            trunkRadiusMultiplier: 1.0,
-            foliageRadiusMultiplier: 1.0,
-            foliageHeightMultiplier: 1.0,
-            weight: 0.25
-        }
-    },
-    
-    scaleVariation: 0.15,       // ±15% scale variation
-    rotationVariation: 0.15,    // ±8.6 degrees rotation variation
-    positionJitter: 0.5         // units of positional jitter
+    // Per-instance variation
+    scaleVariation: 0.15,            // ±15% scale variation per tree
+    rotationVariation: 0.15,         // ±8.6 degrees rotation variation per tree
+    positionJitter: 0.5              // units of positional jitter
 }
 
 export const TILE_CONFIG = {

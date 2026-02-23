@@ -2,8 +2,9 @@ import * as THREE from 'three'
 import { TerrainGenerator } from './terrain'
 import { ConifersTreeGenerator } from './treeGenerator'
 import { TextureManager } from '../textures/textureManager'
-import { TERRAIN_CONFIG, TILE_CONFIG } from '../config'
+import { TILE_CONFIG } from '../config'
 import { debugState } from '../keyboard'
+import { createGroundPlaneFromHeights } from './terrainmesh'
 
 interface TileCoord {
     x: number
@@ -25,8 +26,7 @@ export class TileManager {
     private pendingLODReplacements = new Map<string, { oldMesh: THREE.Mesh; oldLodLevel: number }>()
     private cachedMeshes = new Map<string, { mesh: THREE.Mesh; lodLevel: number; timestamp: number }>()
     private tilesWithTrees = new Set<string>()
-    private workerQueue: Array<{ key: string; tileSize: number; segments: number; worldX: number; worldZ: number }> = []
-    private deferredTreeScatters: Array<{ tile: THREE.Mesh; tileX: number; tileZ: number }> = []
+    private workerQueue: Array<{ key: string; tileSize: number; segments: number; worldX: number; worldZ: number; tileX: number; tileZ: number }> = []
     private scene: THREE.Scene
     private worker: Worker
     private terrainGen: TerrainGenerator
@@ -36,6 +36,7 @@ export class TileManager {
     private maxWorkerMessagesPerFrameInitial = 16
     private isInitialLoad = true
     private initialLoadThreshold = 25
+    private textureLoadingPromise: Promise<void>
 
     constructor(scene: THREE.Scene) {
         this.scene = scene
@@ -44,15 +45,20 @@ export class TileManager {
         this.textureManager = new TextureManager()
         this.worker = new Worker(new URL('../worker/tileWorker.ts', import.meta.url), { type: 'module' })
         this.setupWorkerListener()
-        this.textureManager.loadTextures()
+        this.textureLoadingPromise = this.textureManager.loadTextures()
+    }
+
+    async waitForTexturesReady(): Promise<void> {
+        await this.textureLoadingPromise
     }
 
     private setupWorkerListener() {
         this.worker.onmessage = (event) => {
-            const { key, heights } = event.data
+            const { key, heights, trees } = event.data
             const pending = this.pendingTiles.get(key)
             if (pending) {
-                const tile = this.createGroundPlaneFromHeights(
+                const tile = createGroundPlaneFromHeights(
+                    this.textureManager,
                     pending.tileX * TILE_CONFIG.tileSize,
                     0,
                     pending.tileZ * TILE_CONFIG.tileSize,
@@ -60,35 +66,23 @@ export class TileManager {
                     pending.segments
                 )
                 this.scene.add(tile)
+                
+                // Apply trees from worker (only on initial tile creation, not on LOD updates)
                 const replacement = this.pendingLODReplacements.get(key)
                 if (replacement) {
                     this.scene.remove(replacement.oldMesh)
-                    // Don't touch trees - they're independent of LOD
                     this.pendingLODReplacements.delete(key)
-                } else {
-                    // Only scatter trees on initial tile creation, not on LOD updates
-                    if (!this.tilesWithTrees.has(key)) {
-                        this.deferredTreeScatters.push({ tile, tileX: pending.tileX, tileZ: pending.tileZ })
-                        this.tilesWithTrees.add(key)
-                    }
+                    // Don't apply trees on LOD updates
+                } else if (!this.tilesWithTrees.has(key) && trees) {
+                    // Apply trees on initial tile creation
+                    this.treeGenerator.applyTreesFromData(tile, pending.tileX, pending.tileZ, trees)
+                    this.tilesWithTrees.add(key)
                 }
                 
                 this.loadedTiles.set(key, { mesh: tile, lodLevel: pending.lodLevel })
                 this.pendingTiles.delete(key)
             }
         }
-    }
-
-    private processDeferredTreeScatters() {
-        if (this.deferredTreeScatters.length === 0) return
-        
-        requestIdleCallback(() => {
-            // Process up to 2 deferred scatters per idle period
-            for (let i = 0; i < Math.min(2, this.deferredTreeScatters.length); i++) {
-                const { tile, tileX, tileZ } = this.deferredTreeScatters.shift()!
-                this.treeGenerator.scatterTreesOnTile(tile, tileX, tileZ)
-            }
-        }, { timeout: 100 })
     }
 
     private getTileCoordKey(x: number, z: number): string {
@@ -140,99 +134,6 @@ export class TileManager {
         return null
     }
 
-    private createGroundPlaneFromHeights(xPos: number, yPos: number, zPos: number, heights: Float32Array, segments: number): THREE.Mesh {
-        // Create geometry directly in XZ plane (no rotation needed)
-        const geometry = new THREE.BufferGeometry()
-        const tileSize = TILE_CONFIG.tileSize
-        const segmentSize = tileSize / segments
-        
-        const positions = new Float32Array((segments + 1) * (segments + 1) * 3)
-        let posIndex = 0
-        
-        for (let z = 0; z <= segments; z++) {
-            for (let x = 0; x <= segments; x++) {
-                // Snap edge vertices to quarter-positions for seamless LOD transitions
-                let xPos = x * segmentSize - tileSize / 2
-                let zPos = z * segmentSize - tileSize / 2
-                
-                // Snap edges to prevent seams (within 0.5 unit tolerance)
-                const edgeSnapTolerance = 0.5
-                if (Math.abs(xPos - (-tileSize / 2)) < edgeSnapTolerance) xPos = -tileSize / 2
-                if (Math.abs(xPos - (tileSize / 2)) < edgeSnapTolerance) xPos = tileSize / 2
-                if (Math.abs(zPos - (-tileSize / 2)) < edgeSnapTolerance) zPos = -tileSize / 2
-                if (Math.abs(zPos - (tileSize / 2)) < edgeSnapTolerance) zPos = tileSize / 2
-                
-                positions[posIndex++] = xPos
-                positions[posIndex++] = 0
-                positions[posIndex++] = zPos
-            }
-        }
-        
-        // Create indices for triangle faces
-        const indices = new Uint32Array(segments * segments * 6)
-        let indexIndex = 0
-        for (let z = 0; z < segments; z++) {
-            for (let x = 0; x < segments; x++) {
-                const a = z * (segments + 1) + x
-                const b = z * (segments + 1) + x + 1
-                const c = (z + 1) * (segments + 1) + x
-                const d = (z + 1) * (segments + 1) + x + 1
-                
-                indices[indexIndex++] = a
-                indices[indexIndex++] = c
-                indices[indexIndex++] = b
-                indices[indexIndex++] = b
-                indices[indexIndex++] = c
-                indices[indexIndex++] = d
-            }
-        }
-        
-        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
-        geometry.setIndex(new THREE.BufferAttribute(indices, 1))
-        
-        // Add UV coordinates for texture mapping
-        const uvs = new Float32Array((segments + 1) * (segments + 1) * 2)
-        const textureRepeatScale = TILE_CONFIG.tileSize * TERRAIN_CONFIG.textureRepeatPerUnit
-        let uvIndex = 0
-        for (let z = 0; z <= segments; z++) {
-            for (let x = 0; x <= segments; x++) {
-                uvs[uvIndex++] = (x / segments) * textureRepeatScale
-                uvs[uvIndex++] = (z / segments) * textureRepeatScale
-            }
-        }
-        geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2))
-        
-        // Apply heights
-        const positionAttribute = geometry.attributes.position as THREE.BufferAttribute
-        for (let i = 0; i < positionAttribute.count; i++) {
-            positionAttribute.setY(i, heights[i])
-        }
-        positionAttribute.needsUpdate = true
-        geometry.computeVertexNormals()
-        
-        // Set vertex colors
-        const colors = new Float32Array(positionAttribute.count * 3)
-        const grassColor = new THREE.Color(TERRAIN_CONFIG.grassColor)
-        
-        for (let i = 0; i < positionAttribute.count; i++) {
-            colors[i * 3] = grassColor.r
-            colors[i * 3 + 1] = grassColor.g
-            colors[i * 3 + 2] = grassColor.b
-        }
-        
-        geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3))
-        
-        const material = this.textureManager.createTerrainMaterial()
-        
-        const ground = new THREE.Mesh(geometry, material)
-        ground.position.x = xPos
-        ground.position.y = yPos
-        ground.position.z = zPos
-        ground.receiveShadow = true
-        
-        return ground
-    }
-
     update(cameraWorldPos: THREE.Vector3) {
         if (!debugState.terrainLoadingEnabled) {
             return
@@ -276,7 +177,9 @@ export class TileManager {
                     tileSize: TILE_CONFIG.tileSize,
                     segments,
                     worldX,
-                    worldZ
+                    worldZ,
+                    tileX: x,
+                    tileZ: z
                 })
             }
             
@@ -301,7 +204,9 @@ export class TileManager {
                         tileSize: TILE_CONFIG.tileSize,
                         segments,
                         worldX,
-                        worldZ
+                        worldZ,
+                        tileX: x,
+                        tileZ: z
                     })
                 }
             }
@@ -309,9 +214,6 @@ export class TileManager {
         
         // Process queued worker messages (throttled per frame)
         this.processWorkerQueue()
-        
-        // Process deferred tree scatter operations
-        this.processDeferredTreeScatters()
     }
 
     private processWorkerQueue() {

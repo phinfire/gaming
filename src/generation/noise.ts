@@ -1,3 +1,17 @@
+
+export function fbm(x: number, y: number, noise2D: (x: number, y: number) => number, octaves = 4, lacunarity = 2, gain = 0.5): number {
+    let value = 0;
+    let amplitude = 1;
+    let frequency = 1;
+    let maxValue = 0;
+    for (let i = 0; i < octaves; i++) {
+        value += amplitude * noise2D(x * frequency, y * frequency);
+        maxValue += amplitude;
+        amplitude *= gain;
+        frequency *= lacunarity;
+    }
+    return value / maxValue;
+}
 export function normalize(n: number) {
     return (n + 1) * 0.5;
 }

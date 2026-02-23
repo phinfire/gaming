@@ -45,7 +45,7 @@ function setupCameraTransformUI(camera: THREE.Camera, controls: MapControls, til
     }
 }
 
-function init() {
+async function init() {
     console.log('Initializing game...')
     const { scene, camera, renderer } = setupScene()
 
@@ -58,13 +58,15 @@ function init() {
     
     const controls = setupControls(camera, renderer)
 
-    // Load camera transform AFTER controls are set up
     loadCameraTransform(camera, controls)
 
     setupInputHandlers()
     setupResizeHandler(camera as any, renderer)
     setupClickHandler(camera, clickableObjects)
     setupCameraTransformUI(camera, controls, tileManager)
+    console.log('[Main] Waiting for textures to load...')
+    await tileManager.waitForTexturesReady()
+    console.log('[Main] Textures loaded, starting game loop')
 
     animate({ scene, camera, renderer, controls, objects: clickableObjects, tileManager, lights })
 }
